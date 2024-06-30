@@ -69,26 +69,83 @@ public:
     };
 
 public:
-    http_conn(){}
-    ~http_conn(){}
+    http_conn() {}
+    ~http_conn() {}
 
 public:
-    void init(int sockfd,consy sockaddr_in&addr,char*,int,int,string user,string passwd,string sqlname);
-    void close_conn(bool real_close=true);
+    void init(int sockfd, consy sockaddr_in &addr, char *, int, int, string user, string passwd, string sqlname);
+    void close_conn(bool real_close = true);
     void process();
     bool read_once();
     bool write();
-    sockaddr_in* get_address()
+    sockaddr_in *get_address()
     {
         return &m_address;
     }
-    void initmysql_result(connection_pool* connPool);
+    void initmysql_result(connection_pool *connPool);
     int timer_flag;
     int improv;
 
 private:
     void init();
     HTTP_CODE process_read();
-    
+    bool process_write(HTTP_CODE ret);
+    HTTP_CODE prase_request_line(char *text);
+    HTTP_CODE prase_headers(char *text);
+    HTTP_CODE prase_content(char *text);
+    HTTP_CODE do_request();
+    char *get_line() { return m_read_buf + m_start_line; }
+    LINE_STATUS parse_line();
+    void unmap();
+    bool add_response(const char *format, ...);
+    bool add_content(const char *content);
+    bool add_status_line(int status, const char *title);
+    bool add_headers(int content_length);
+    bool add_content_type();
+    bool add_content_length(int content_length);
+    bool add_linger();
+    bool add_blank_line();
 
-}
+public:
+    static int m_epollfd;
+    static int m_user_count;
+    MYSQL *mysql;
+    int m_state; // read->0 write->1
+
+private:
+    int m_sockfd;
+    sockaddr_in m_address;
+    char m_read_buf[READ_BUFFER_SIZE];
+    long m_read_idx;
+    long m_checked_idx;
+    int m_start_line;
+    char m_write_buf[WRITE_BUFFER_SIZE];
+    int m_write_idx;
+    CHECK_STATE m_check_state;
+    METHOD m_method;
+    char m_real_file[FILENAME_LEN];
+    char *m_url;
+    char *m_version;
+    char *m_host;
+    long m_content_length;
+    bool m_linger;
+    char *m_file_address;
+    struct stat m_file_stat;
+    struct iovec m_iv[2];
+    int m_iv_count;
+    int cgi; // 是否是启用的post
+    char *m_string;
+    int bytes_to_send;
+    int bytes_have_send;
+    char *doc_root;
+
+    map<string, string> m_users;
+    int m_TRIGMode;
+    int m_close_log;
+
+    char sql_user[100];
+    char_sql_passwd[100];
+    char sql_name[100];
+};
+
+#endif
