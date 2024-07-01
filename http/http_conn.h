@@ -63,9 +63,9 @@ public:
     };
     enum LINE_STATUS
     {
-        LINE_OK = 0,
+        LINE_OK = 0, // 当前行已经被成功解析,即找到了完整的行结束标记 (\r\n)
         LINE_BAD,
-        LINE_OPEN
+        LINE_OPEN   //行不完整
     };
 
 public:
