@@ -55,7 +55,7 @@ public:
         NO_REQUEST,
         GET_REQUEST,
         BAD_REQUEST,
-        NO_REQUEST,
+        NO_RESOURCE,
         FORBIDDEN_REQUEST,
         FILE_REQUEST,
         INTERNAL_ERROR,
@@ -90,9 +90,9 @@ private:
     void init();
     HTTP_CODE process_read();
     bool process_write(HTTP_CODE ret);
-    HTTP_CODE prase_request_line(char *text);
-    HTTP_CODE prase_headers(char *text);
-    HTTP_CODE prase_content(char *text);
+    HTTP_CODE parse_request_line(char *text);
+    HTTP_CODE parse_headers(char *text);
+    HTTP_CODE parse_content(char *text);
     HTTP_CODE do_request();
     char *get_line() { return m_read_buf + m_start_line; }
     LINE_STATUS parse_line();
