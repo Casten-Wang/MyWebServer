@@ -131,7 +131,7 @@ private:
     bool m_linger;
     char *m_file_address;
     struct stat m_file_stat;
-    struct iovec m_iv[2];
+    struct iovec m_iv[2];   // m_iv 是一个 iovec 结构体数组,用于指定多个非连续的内存区域
     int m_iv_count;
     int cgi; // 是否是启用的post
     char *m_string;

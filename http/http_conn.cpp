@@ -74,7 +74,7 @@ void addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 // 从内核事件表中删除fd
 void removefd(int epollfd, int fd)
 {
-    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0); // 从 epoll 监听集合中删除文件描述符 fd
+    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0); // EPOLL_CTL_DEL---->从 epoll 监听集合中删除文件描述符 fd
     close(fd);                                // 关闭文件描述符 fd
 }
 
@@ -515,7 +515,7 @@ http_conn::HTTP_CODE http_conn::do_request()
         else
             strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
 
-        if (stat(m_real_file, &m_file_stat) < 0) //意味着该文件不存在或无法访问
+        if (stat(m_real_file, &m_file_stat) < 0) // 意味着该文件不存在或无法访问
             return NO_RESOURCE;
 
         if (!(m_file_stat.st_mode & S_IROTH))
@@ -529,4 +529,105 @@ http_conn::HTTP_CODE http_conn::do_request()
         close(fd);
         return FILE_REQUEST;
     }
+}
+
+void http_conn::unmap()
+{
+    if (m_file_address)
+    {
+        munmap(m_file_address, m_file_stat.st_size);
+        m_file_address = 0;
+    }
+}
+
+// 将缓冲区中的数据通过套接字发送到客户端
+// EPOLLIN：表示套接字上有数据可读
+// EPOLLOUT：表示套接字可以写入数据。当服务器向客户端发送数据时,内核会监听这个事件
+bool http_conn::write()
+{
+    int temp = 0;
+
+    if (bytes_to_send == 0)
+    {
+        modfd(m_epollfd, m_sockfd, EPOLLIN, m_TRIGMode); // 修改了某个文件描述符(m_sockfd)在 epoll 实例(m_epollfd)中的事件监听状态。将其监听设置为 EPOLLIN(读事件)。
+        init();
+        return true;
+    }
+
+    while (1)
+    {
+        temp = writev(m_sockfd, m_iv, m_iv_count); // writev() 是一个 I/O 系统调用,可以一次性向套接字写入多个非连续的内存区域
+
+        if (temp < 0)
+        {
+            if (errno == EAGAIN)
+            {
+                modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
+                return true;
+            }
+            unmap();
+            return false;
+        }
+
+        bytes_have_send += temp;
+        bytes_to_send -= temp;
+        if (bytes_have_send >= m_iv[0].iov_len)
+        {
+            m_iv[0].iov_len = 0;
+            m_iv[1].iov_base = m_file_address + (bytes_have_send - m_write_idx);
+            m_iv[1].iov_len = bytes_to_send;
+        }
+        else
+        {
+            m_iv[0].iov_base = m_write_buf + bytes_have_send;
+            m_iv[0].iov_len = m_iv[0].iov_len - bytes_have_send;
+        }
+
+        if (bytes_to_send <= 0)
+        {
+            unmap();
+            modfd(m_epollfd, m_sockfd, EPOLLIN, m_TRIGMode);
+
+            if (m_linger)
+            {
+                init();
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+    }
+}
+
+/* 这个 add_response() 函数是用来向 HTTP 响应缓冲区 m_write_buf 中添加数据的。它的作用是:
+
+检查当前写入索引 m_write_idx 是否超出了缓冲区的大小 WRITE_BUFFER_SIZE。如果超出了,则表示缓冲区已满,无法继续添加数据,于是返回 false。
+使用 va_start() 和 va_end() 宏来处理可变参数列表。这里的 format 参数是一个格式化字符串,后面跟着的就是要被格式化的参数。
+调用 vsnprintf() 函数将格式化后的字符串写入到 m_write_buf 缓冲区中,起始位置是 m_write_idx。vsnprintf() 返回实际写入的字符数,不包括结尾的空字符。
+如果写入的字符数超出了缓冲区的剩余空间,则返回 false。
+如果写入成功,则更新 m_write_idx 的值,表示缓冲区中已经写入的数据长度。
+最后打印一条日志,记录当前 m_write_buf 中的内容 
+*/
+bool http_conn::add_response(const char *format, ...)
+{
+    if (m_write_idx >= WRITE_BUFFER_SIZE)
+    {
+        return false;
+    }
+    va_list arg_list;
+    va_start(arg_list, format);
+    int len = vsnprintf(m_write_buf + m_write_idx, WRITE_BUFFER_SIZE - 1 - m_write_idx, format, arg_list);
+    if (len >= (WRITE_BUFFER_SIZE - 1 - m_write_idx))
+    {
+        va_end(arg_list);
+        return false;
+    }
+    m_write_idx += len;
+    va_end(arg_list);
+
+    LOG_INFO("request:%s", m_write_buf);
+
+    return true;
 }
