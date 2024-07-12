@@ -345,6 +345,7 @@ http_conn::HTTP_CODE http_conn::parse_content(char *text)
     return NO_REQUEST;
 }
 
+// 读取并解析客户端发送的 HTTP 请求
 http_conn::HTTP_CODE http_conn::process_read()
 {
     LINE_STATUS line_status = LINE_OK;
@@ -608,7 +609,7 @@ bool http_conn::write()
 调用 vsnprintf() 函数将格式化后的字符串写入到 m_write_buf 缓冲区中,起始位置是 m_write_idx。vsnprintf() 返回实际写入的字符数,不包括结尾的空字符。
 如果写入的字符数超出了缓冲区的剩余空间,则返回 false。
 如果写入成功,则更新 m_write_idx 的值,表示缓冲区中已经写入的数据长度。
-最后打印一条日志,记录当前 m_write_buf 中的内容 
+最后打印一条日志,记录当前 m_write_buf 中的内容
 */
 bool http_conn::add_response(const char *format, ...)
 {
@@ -630,4 +631,127 @@ bool http_conn::add_response(const char *format, ...)
     LOG_INFO("request:%s", m_write_buf);
 
     return true;
+}
+
+bool http_conn::add_status_line(int status, const char *title)
+{
+    return add_response("%s %d %s\r\n", "HTTP/1.1", status, title);
+}
+
+bool http_conn::add_headers(int content_len)
+{
+    return add_content_length(content_len) && add_linger() && add_blank_line();
+}
+
+bool http_conn::add_content_length(int content_len)
+{
+    return add_response("Content-Length:%d\r\n", content_len);
+}
+
+bool http_conn::add_content_type()
+{
+    return add_response("Content-Type:%s\r\n", "text/html");
+}
+
+bool http_conn::add_linger()
+{
+    return add_response("Connection:%s\r\n", (m_linger == true) ? "keep-alive" : "close");
+}
+
+bool http_conn::add_blank_line()
+{
+    return add_response("%s", "\r\n");
+}
+bool http_conn::add_content(const char *content)
+{
+    return add_response("%s", content);
+}
+
+// 负责准备并发送 HTTP 响应
+bool http_conn::process_write(HTTP_CODE ret)
+{
+    switch (ret)
+    {
+    case INTERNAL_ERROR:
+        add_status_line(500, error_500_title);
+        add_headers(strlen(error_500_form));
+        if (!add_content(error_500_form))
+        {
+            return false;
+        }
+        break;
+    case BAD_REQUEST:
+    {
+        add_status_line(404, error_400_title);
+        add_headers(strlen(error_400_form));
+        if (!add_content(error_400_form))
+        {
+            return false;
+        }
+        break;
+    }
+    case FORBIDDEN_REQUEST:
+    {
+        add_status_line(403, error_403_title);
+        add_headers(strlen(error_403_form));
+        if (!add_content(error_403_form))
+        {
+            return false;
+        }
+        break;
+    }
+    case FILE_REQUEST:
+    {
+        add_status_line(200, ok_200_title);
+        if (m_file_stat.st_size != 0)
+        {
+            add_headers(m_file_stat.st_size);
+            m_iv[0].iov_base = m_write_buf;
+            m_iv[0].iov_len = m_write_idx;
+            m_iv[1].iov_base = m_file_address;
+            m_iv[1].iov_len = m_file_stat.st_size;
+            m_iv_count = 2;
+            bytes_to_send = m_write_idx + m_file_stat.st_size;
+            return true;
+        }
+        else
+        {
+            const char *ok_string = "<html><body></body></html>";
+            add_headers(strlen(ok_string));
+            if (!add_content(ok_string))
+            {
+                return false;
+            }
+        }
+    }
+    default:
+        return false;
+    }
+    m_iv[0].iov_base = m_write_buf;
+    m_iv[0].iov_len = m_write_idx;
+    m_iv_count = 1;
+    bytes_to_send = m_write_idx;
+    return true;
+}
+
+/* 这段代码实现了一个简单的 HTTP 连接处理流程:
+
+读取并解析客户端请求
+根据请求生成响应
+发送响应内容
+根据处理结果决定是否关闭连接 */
+void http_conn::process()
+{
+    HTTP_CODE read_ret = process_read();
+    if (read_ret == NO_REQUEST)
+    {
+        modfd(m_epollfd, m_sockfd, EPOLLIN, m_TRIGMode);
+        return;
+    }
+    bool write_ret = process_write(read_ret);
+    if (!write_ret)
+    {
+        close_conn();
+    }
+    modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
 }
