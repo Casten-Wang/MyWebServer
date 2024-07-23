@@ -37,8 +37,8 @@ private:
     FILE *m_fp;         // 打开log的文件指针
     char *m_buf;
     block_queue<string> *m_log_queue; // 阻塞队列
-    bool m_is_async;                  // 是否同步标志位
-    locker m_mutex;
+    bool m_is_async;                  // 是否异步标志位
+    locker m_mutex; //互斥锁
     int m_close_log; // 关闭日志
 
 public:
